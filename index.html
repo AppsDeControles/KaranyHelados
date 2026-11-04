@@ -246,6 +246,15 @@ dialog::backdrop{background:rgba(37,22,63,.55)}
 .formato-op input:focus-visible+.caj{outline:3px solid var(--mango);outline-offset:2px}
 .formato-op svg{display:block;width:100%;height:58px;margin-bottom:6px}
 
+/* Caja */
+.caja-bar.alerta{box-shadow:inset 0 0 0 1.5px var(--alerta)}
+.caja-bar .botones{display:flex;gap:6px;flex:none}
+.caja-bar .btn.mini{padding-inline:12px}
+.caja-res{display:grid;grid-template-columns:1fr auto;gap:4px 12px;margin-bottom:14px;font-size:15px}
+.caja-res b{text-align:right}
+.caja-res .tot{border-top:1px solid var(--linea);padding-top:6px;font-weight:700}
+.caja-det{background:var(--papel);border-radius:12px;box-shadow:inset 0 0 0 1px var(--linea);padding:12px;margin:8px 0 12px}
+
 /* Vacaciones */
 .vac{background:var(--papel);border-radius:14px;box-shadow:inset 0 0 0 1px var(--linea);padding:14px;margin:10px 0 12px}
 .vac h3{font-size:19px;margin-bottom:8px}
@@ -306,7 +315,7 @@ dialog::backdrop{background:rgba(37,22,63,.55)}
 /* Pega aquí la URL del servidor de Apps Script (termina en /exec).
    Si la dejas vacía, la app la pedirá la primera vez en cada dispositivo. */
 const API_URL = '';
-const VERSION_APP = '1.2.0';
+const VERSION_APP = '1.3.0';
 
 /* ========== Utilidades ========== */
 const $ = (s, r = document) => r.querySelector(s);
@@ -430,6 +439,22 @@ async function sincImagenes() {
 const imgDe = (id) => S.imgs[id]?.d || '';
 
 function aplicarOp(d, op) {
+  if (op.tipo === 'caja') {
+    const cj = d.cajas || (d.cajas = { abiertas: [], ultimoCierre: null });
+    if (op.accion === 'abrir') {
+      if (!cj.abiertas.some((c) => c.id === op.id)) cj.abiertas.push({ id: op.id, dia: op.dia, hora: op.hora, abrioNombre: op.usuarioNombre, fondo: op.fondo, movs: [], ...(esSocia() ? { ventasEfectivo: 0 } : {}) });
+    } else if (op.accion === 'cerrar') {
+      cj.abiertas = cj.abiertas.filter((c) => c.id !== op.cajaId);
+    } else if (op.accion === 'mov') {
+      const c = cj.abiertas.find((x) => x.id === op.cajaId);
+      if (c) c.movs.push({ id: op.id, hora: op.hora, tipo: op.tipoMov, monto: op.monto, motivo: op.motivo, usuarioNombre: op.usuarioNombre });
+    }
+    return;
+  }
+  if (op.tipo === 'venta' && op.cajaId && op.metodo === 'efectivo') {
+    const c = d.cajas?.abiertas?.find((x) => x.id === op.cajaId);
+    if (c && c.ventasEfectivo !== undefined) c.ventasEfectivo += op.total;
+  }
   if (op.tipo === 'asistencia') {
     const lista = S.asis[op.usuarioId] || (S.asis[op.usuarioId] = []);
     if (op.accion === 'entrada') {
@@ -483,7 +508,11 @@ function encolar(op) {
   sincronizar();
 }
 
-async function sincronizar() {
+function sincronizar() {
+  if (!S.syncP) S.syncP = sincronizarAhora().finally(() => { S.syncP = null; });
+  return S.syncP;
+}
+async function sincronizarAhora() {
   if (S.sincronizando || !S.sesion || !S.api || S.sesionVencida) return;
   S.sincronizando = true;
   try {
@@ -517,7 +546,7 @@ async function sincronizar() {
 
 function redibujarSiLibre() {
   if ($('#dlg').open) { refrescarEstado(); return; }
-  if (S.vista === 'vender') { dibujarProductos(); const b = $('#turno-slot'); if (b) b.innerHTML = htmlTurnoBar(); }
+  if (S.vista === 'vender') { dibujarProductos(); const b = $('#turno-slot'); if (b) b.innerHTML = htmlTurnoBar(); const cb = $('#caja-slot'); if (cb) cb.innerHTML = htmlCajaBar(); }
   else if (S.vista === 'inventario') dibujar();
 }
 
@@ -664,6 +693,7 @@ function limpiarDatosSensibles() {
     delete S.datos.usuarios;
     delete S.datos.turnos;
     delete S.datos.vacaciones;
+    if (S.datos.cajas) { S.datos.cajas.abiertas?.forEach((c) => delete c.ventasEfectivo); S.datos.cajas.ultimoCierre = null; }
     delete S.datos.miTurno;
     ls.set('datos', S.datos);
   }
@@ -691,7 +721,7 @@ function vistaVender(p) {
   const cats = ['Todos', ...new Set(prods.map((x) => x.categoria).filter(Boolean))];
   if (!cats.includes(S.categoria)) S.categoria = 'Todos';
   p.innerHTML = `<div class="caja">
-    <div>${barra(S.datos?.negocio || 'Paletería', `<button class="btn mini" data-a="ventas-dia" aria-label="Ventas de hoy">Ventas</button>`)}<div id="turno-slot">${htmlTurnoBar()}</div></div>
+    <div>${barra(S.datos?.negocio || 'Paletería', `<button class="btn mini" data-a="ventas-dia" aria-label="Ventas de hoy">Ventas</button>`)}<div id="turno-slot">${htmlTurnoBar()}</div><div id="caja-slot">${htmlCajaBar()}</div></div>
     ${prods.length > 16 ? `<div class="buscar-env"><div class="buscar"><input class="ent" id="buscar" type="search" aria-label="Buscar producto" placeholder="Buscar producto" value="${esc(S.busqueda)}" style="margin:0"></div></div>` : '<div class="buscar-env"></div>'}
     ${cats.length > 2 ? `<div class="pestanas">${cats.map((c) => `<button class="pest" data-a="categoria" data-c="${esc(c)}" aria-pressed="${c === S.categoria}">${esc(c)}</button>`).join('')}</div>` : '<div class="pestanas" hidden></div>'}
     <div class="caja-prod" id="productos"></div>
@@ -778,6 +808,7 @@ function dialogoCobro() {
   const billetes = [20, 50, 100, 200, 500, 1000].filter((b) => b > total).slice(0, 4);
   abrirDlg(`${cabDlg('Cobrar')}<div>${htmlLineas()}</div>
     <div class="pagar-total"><span>Total</span><b>${dinero(total)}</b></div>
+    ${cajaActual() ? '' : '<div class="pista">La caja no está abierta. Puedes cobrar, pero el efectivo de esta venta no entrará en ningún corte.</div>'}
     <button class="btn pri exacto" data-a="pagar" data-m="efectivo" data-r="${total}">Efectivo exacto</button>
     <p class="chico" style="margin-bottom:6px">Pagó con:</p>
     <div class="billetes">${billetes.map((b) => `<button class="btn mini" data-a="pagar" data-m="efectivo" data-r="${b}">${dinero(b)}</button>`).join('')}<button class="btn mini" data-a="otro-monto">Otro</button></div>
@@ -789,7 +820,7 @@ function registrarVenta(metodo, recibido) {
   const total = totalCarrito();
   const venta = {
     id: uid('v_'), tipo: 'venta', dia: diaStr(ahora), hora: `${pad(ahora.getHours())}:${pad(ahora.getMinutes())}`, ts: ahora.toISOString(),
-    total, metodo, recibido: recibido || 0, vendedorId: S.sesion.usuario.id, vendedorNombre: S.sesion.usuario.nombre,
+    total, metodo, recibido: recibido || 0, vendedorId: S.sesion.usuario.id, vendedorNombre: S.sesion.usuario.nombre, cajaId: cajaActual()?.id || '',
     lineas: S.carrito.map((l) => ({ ...l }))
   };
   try {
@@ -1097,7 +1128,7 @@ async function cargarReporte() {
   try {
     await sincronizar();
     const r = await api('reporte', { desde: `${y - 1}-01-01`, hasta: `${y}-12-31` });
-    S.rep.datos = { clave: cl, fresco: Date.now(), filas: r.filas, tickets: r.tickets, agua: r.agua, nombres: r.nombres, asistencia: r.asistencia || [] };
+    S.rep.datos = { clave: cl, fresco: Date.now(), filas: r.filas, tickets: r.tickets, agua: r.agua, nombres: r.nombres, asistencia: r.asistencia || [], cajas: r.cajas || [], sinCaja: r.sinCaja || {} };
     ls.set('reporte', S.rep.datos);
   } catch (e) {
     S.rep.error = e.red ? 'Sin conexión. Los números son de la última vez que se cargaron.' : e.message;
@@ -1144,7 +1175,7 @@ function htmlReporte(D, d1, d2) {
   const metodos = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta' };
   const pend = S.cola.filter((o) => o.tipo === 'venta').length;
   if (!t.n && !lista.length) {
-    return `${pend ? `<div class="pista">Hay ${pend} por subir en este dispositivo.</div>` : ''}<div class="vacio"><h2>Sin ventas en este periodo</h2><p>Cuando se registren ventas, aquí verás el total y los productos más vendidos.</p></div>${htmlPersonalHoy(D, d1, d2)}${htmlAguaReporte(D, d1, d2, {})}${htmlAsistencia(D, d1, d2)}`;
+    return `${pend ? `<div class="pista">Hay ${pend} por subir en este dispositivo.</div>` : ''}<div class="vacio"><h2>Sin ventas en este periodo</h2><p>Cuando se registren ventas, aquí verás el total y los productos más vendidos.</p></div>${htmlCajaReporte(D, d1, d2)}${htmlPersonalHoy(D, d1, d2)}${htmlAguaReporte(D, d1, d2, {})}${htmlAsistencia(D, d1, d2)}`;
   }
   return `${pend ? `<div class="pista">Faltan ${pend} ventas por subir de este dispositivo; no están en estos números.</div>` : ''}
     <div class="heroe"><div class="monto">${dinero(t.imp)}</div><div class="comp">${esc(frase || 'Vendido en este periodo')}</div></div>
@@ -1154,6 +1185,7 @@ function htmlReporte(D, d1, d2) {
       <div><b>${dinero(ganancia)}</b><span>Ganancia sobre el costo${faltan.length ? `, sin contar ${plural(faltan.length, 'producto')} sin costo` : ''}</span></div>
       ${Object.entries(metodos).filter(([m]) => t.metodos[m]).map(([m, n]) => `<div><b>${dinero(t.metodos[m])}</b><span>${n}</span></div>`).join('')}
     </div>
+    ${htmlCajaReporte(D, d1, d2)}
     ${htmlPersonalHoy(D, d1, d2)}
     ${htmlGrafica(D, d1, d2)}
     ${htmlRanking(D, d1, d2, prodM)}
@@ -1374,6 +1406,100 @@ function formAsistencia(id, usuarioId, dia) {
     <label class="campo">Salida<input class="ent" type="time" name="salida" value="${esc(r?.salida || '')}"></label></div>
     <label class="campo">Nota <small>Por ejemplo: olvidó registrar su salida</small><input class="ent" name="nota" maxlength="200" value="${esc(r?.nota || '')}"></label>
     <button class="btn pri ancho">Guardar registro</button></form>`);
+}
+
+/* ========== Caja ========== */
+const cajasAbiertas = () => S.datos?.cajas?.abiertas || [];
+const cajaActual = () => { const a = cajasAbiertas(); return a.length ? a[a.length - 1] : null; };
+const sumaMovs = (c, t) => (c.movs || []).reduce((a, m) => (m.tipo === t ? a + m.monto : a), 0);
+const esperadoLocal = (c) => c.fondo + (c.ventasEfectivo || 0) + sumaMovs(c, 'entrada') - sumaMovs(c, 'salida');
+function etiquetaDif(d) {
+  if (d === null || d === undefined) return '<span class="etq mal">Sin cerrar</span>';
+  if (Math.abs(d) < 0.01) return '<span class="etq ok">Cuadra</span>';
+  return d < 0 ? `<span class="etq mal">Faltaron ${dinero(-d)}</span>` : `<span class="etq pend">Sobraron ${dinero(d)}</span>`;
+}
+function botonesCaja() {
+  const c = cajaActual();
+  return c
+    ? '<button class="btn mini" data-a="mov-caja">Efectivo</button><button class="btn mini" data-a="cerrar-caja">Cerrar caja</button>'
+    : '<button class="btn mini pri" data-a="abrir-caja">Abrir caja</button>';
+}
+function htmlCajaBar() {
+  if (!S.datos) return '';
+  const c = cajaActual();
+  if (!c) return `<div class="turno-bar caja-bar"><div><b>Caja cerrada</b><span class="chico">Ábrela con el fondo del día</span></div><div class="botones">${botonesCaja()}</div></div>`;
+  const hoy = diaStr(new Date());
+  const vieja = c.dia !== hoy;
+  const varias = cajasAbiertas().length > 1 ? `<br><span class="alerta-txt chico">Hay ${cajasAbiertas().length} cajas abiertas: cierra esta y aparecerá la otra.</span>` : '';
+  return `<div class="turno-bar caja-bar ${vieja || varias ? 'alerta' : ''}"><div><b>${vieja ? `Abierta desde el ${fechaCorta(c.dia)}` : 'Caja abierta'}</b><span class="chico">${hora12(c.hora)}, ${esc(c.abrioNombre)}</span>${varias}</div><div class="botones">${botonesCaja()}</div></div>`;
+}
+function opCaja(extra) {
+  const a = new Date();
+  const u = S.sesion.usuario;
+  return { tipo: 'caja', dia: diaStr(a), hora: `${pad(a.getHours())}:${pad(a.getMinutes())}`, ts: a.toISOString(), usuarioId: u.id, usuarioNombre: u.nombre, ...extra };
+}
+function dialogoAbrirCaja() {
+  abrirDlg(`${cabDlg('Abrir caja')}<form data-f="abrir-caja"><div id="f-err"></div>
+    <label class="campo">Fondo de caja <small>Cuenta el efectivo con el que empiezas. Si no hay, escribe 0.</small><input class="ent" name="fondo" type="number" min="0" step="0.5" inputmode="decimal" required autofocus></label>
+    <button class="btn pri ancho">Abrir caja</button></form>`);
+}
+function dialogoMovCaja() {
+  abrirDlg(`${cabDlg('Movimiento de efectivo')}<form data-f="mov-caja"><div id="f-err"></div>
+    <div class="seg" role="radiogroup" aria-label="Tipo de movimiento"><label><input type="radio" name="tipo" value="salida" checked><span>Sale de caja</span></label><label><input type="radio" name="tipo" value="entrada"><span>Entra a caja</span></label></div>
+    <label class="campo">Monto<input class="ent" name="monto" type="number" min="0.5" step="0.5" inputmode="decimal" required></label>
+    <label class="campo">Motivo <small>Por ejemplo: pago de hielo, retiro de socia, cambio</small><input class="ent" name="motivo" maxlength="200" required></label>
+    <button class="btn pri ancho">Guardar movimiento</button></form>`);
+}
+function dialogoCerrarCaja() {
+  const c = cajaActual();
+  if (!c) return;
+  const socia = esSocia();
+  const resumen = socia
+    ? `<div class="caja-res"><span>Fondo</span><b>${dinero(c.fondo)}</b><span>Ventas en efectivo</span><b>${dinero(c.ventasEfectivo || 0)}</b><span>Entradas</span><b>${dinero(sumaMovs(c, 'entrada'))}</b><span>Salidas</span><b>${sumaMovs(c, 'salida') ? '−' : ''}${dinero(sumaMovs(c, 'salida'))}</b><span class="tot">Debe haber</span><b class="tot">${dinero(esperadoLocal(c))}</b></div>`
+    : '<div class="pista">Cuenta todo el efectivo de la caja, incluido el fondo. Al guardar verás si cuadra.</div>';
+  abrirDlg(`${cabDlg('Cerrar caja')}<form data-f="cerrar-caja" id="f-cierre"><div id="f-err"></div>${resumen}
+    <label class="campo">Efectivo contado<input class="ent" name="contado" type="number" min="0" step="0.5" inputmode="decimal" required autofocus></label>
+    ${socia ? '<p class="chico" id="cierre-dif" style="margin:-6px 0 12px"></p>' : ''}
+    <label class="campo">Nota <small>Opcional</small><input class="ent" name="nota" maxlength="200"></label>
+    <button class="btn pri ancho">Cerrar caja</button></form>`);
+}
+function resultadoCierre(id, contado) {
+  const u = S.datos?.cajas?.ultimoCierre;
+  if (u?.id === id) {
+    abrirDlg(`${cabDlg('Caja cerrada')}<div class="caja-res"><span>Debía haber</span><b>${dinero(u.esperado)}</b><span>Contado</span><b>${dinero(u.contado)}</b></div><p style="margin-bottom:14px">${etiquetaDif(u.contado - u.esperado)}</p><button class="btn pri ancho" data-a="cerrar">Listo</button>`);
+  } else {
+    abrirDlg(`${cabDlg('Caja cerrada')}<div class="pista">Contaste ${dinero(contado)}. Sin conexión todavía: el cierre se sube solo y la diferencia se verá en el tablero.</div><button class="btn pri ancho" data-a="cerrar">Listo</button>`);
+  }
+}
+function htmlCajaReporte(D, d1, d2) {
+  const lista = (D.cajas || []).filter((c) => c.dia >= d1 && c.dia <= d2).sort((a, b) => (b.dia + b.hora).localeCompare(a.dia + a.hora));
+  const faltas = lista.reduce((a, c) => a + (c.diferencia < 0 ? -c.diferencia : 0), 0);
+  const sobras = lista.reduce((a, c) => a + (c.diferencia > 0 ? c.diferencia : 0), 0);
+  const sinCerrar = lista.filter((c) => c.estado !== 'cerrada').length;
+  const sinCaja = Object.entries(D.sinCaja || {}).reduce((a, [d, v]) => (d >= d1 && d <= d2 ? a + v : a), 0);
+  const abierta = S.rep.cajaAbierta;
+  return `<div class="grafica"><div class="tit-sec"><h2>Caja</h2><div class="botones" style="display:flex;gap:6px">${botonesCaja()}</div></div>
+    ${cajaActual() ? `<p class="chico" style="margin-bottom:8px">Abierta ${cajaActual().dia === diaStr(new Date()) ? 'hoy' : `desde el ${fechaCorta(cajaActual().dia)}`} a las ${hora12(cajaActual().hora)} por ${esc(cajaActual().abrioNombre)}. Debe haber ${dinero(esperadoLocal(cajaActual()))}.</p>` : ''}
+    ${lista.length ? `<div class="datos3" style="margin-bottom:6px"><div><b>${lista.length}</b><span>${lista.length === 1 ? 'Corte' : 'Cortes'}</span></div><div><b>${dinero(faltas)}</b><span>Faltantes</span></div><div><b>${dinero(sobras)}</b><span>Sobrantes</span></div>${sinCerrar ? `<div><b>${sinCerrar}</b><span>Sin cerrar</span></div>` : ''}</div>` : '<p class="chico">Sin cortes en este periodo.</p>'}
+    ${sinCaja > 0.009 ? `<p class="chico alerta-txt" style="margin-bottom:6px">${dinero(sinCaja)} en efectivo se vendieron sin caja abierta.</p>` : ''}
+    ${lista.slice(0, 31).map((c) => {
+    const ab = abierta === c.id;
+    return `<button class="resumen-p" data-a="caja-det" data-id="${esc(c.id)}" aria-expanded="${ab}"><span class="persona-top" style="display:flex"><b>${fechaCorta(c.dia)}</b>${etiquetaDif(c.diferencia)}</span>
+      <span class="chico">Abrió ${esc(c.abrioNombre)} a las ${hora12(c.hora)}${c.estado === 'cerrada' ? `. Cerró ${esc(c.cerroNombre)} a las ${hora12(c.horaCierre)}${c.diaCierre !== c.dia ? ` del ${fechaCorta(c.diaCierre)}` : ''}` : ''}</span></button>
+      ${ab ? `<div class="caja-det"><div class="caja-res"><span>Fondo</span><b>${dinero(c.fondo)}</b><span>Ventas en efectivo</span><b>${dinero(c.ventasEfectivo)}</b><span>Entradas</span><b>${dinero(c.entradas)}</b><span>Salidas</span><b>${c.salidas ? '−' : ''}${dinero(c.salidas)}</b><span class="tot">Debía haber</span><b class="tot">${dinero(c.esperado)}</b>${c.estado === 'cerrada' ? `<span>Contado</span><b>${dinero(c.contado)}</b>` : ''}<span>Transferencia y tarjeta</span><b>${dinero(c.otrosPagos)}</b></div>
+        ${c.movs.map((m) => `<div class="mov"><b>${m.tipo === 'entrada' ? 'Entró' : 'Salió'} ${dinero(m.monto)}</b>: ${esc(m.motivo)}<div class="chico">${hora12(m.hora)}, ${esc(m.usuarioNombre)}</div></div>`).join('')}
+        ${c.nota ? `<p class="chico" style="margin-top:8px">Nota: ${esc(c.nota)}</p>` : ''}${c.corregidoPor ? `<p class="chico">Corregido por ${esc(c.corregidoPor)}</p>` : ''}
+        <div class="acciones" style="margin-top:10px"><button class="btn mini" data-a="form-corte" data-id="${esc(c.id)}">Corregir</button>${c.estado === 'cerrada' && !cajaActual() ? `<button class="btn mini" data-a="reabrir-caja" data-id="${esc(c.id)}">Reabrir caja</button>` : ''}</div></div>` : ''}`;
+  }).join('')}${lista.length > 31 ? '<p class="chico" style="padding-top:8px">Se muestran los 31 cortes más recientes.</p>' : ''}</div>`;
+}
+function formCorte(id) {
+  const c = S.rep.datos.cajas.find((x) => x.id === id);
+  abrirDlg(`${cabDlg('Corregir corte')}<div class="pista">${fechaCorta(c.dia)}, abierta por ${esc(c.abrioNombre)}</div>
+  <form data-f="corte" data-id="${esc(id)}"><div id="f-err"></div>
+    <label class="campo">Fondo<input class="ent" name="fondo" type="number" min="0" step="0.5" inputmode="decimal" required value="${c.fondo}"></label>
+    ${c.estado === 'cerrada' ? `<label class="campo">Efectivo contado<input class="ent" name="contado" type="number" min="0" step="0.5" inputmode="decimal" required value="${c.contado}"></label>` : ''}
+    <label class="campo">Nota <small>Por qué se corrige</small><input class="ent" name="nota" maxlength="200" required value="${esc(c.nota)}"></label>
+    <button class="btn pri ancho">Guardar corrección</button></form>`);
 }
 
 /* ========== Vacaciones ========== */
@@ -1880,6 +2006,21 @@ const A = {
   'recargar-reporte'() { S.rep.error = ''; if (S.rep.datos) S.rep.datos.fresco = 0; dibujar(); },
   persona(el) { S.rep.personaAbierta = S.rep.personaAbierta === el.dataset.id ? null : el.dataset.id; dibujar(); },
   'form-asis'(el) { formAsistencia(el.dataset.id, el.dataset.u, el.dataset.d); },
+  'abrir-caja': dialogoAbrirCaja,
+  'mov-caja': dialogoMovCaja,
+  'cerrar-caja': dialogoCerrarCaja,
+  'caja-det'(el) { S.rep.cajaAbierta = S.rep.cajaAbierta === el.dataset.id ? null : el.dataset.id; dibujar(); },
+  'form-corte'(el) { formCorte(el.dataset.id); },
+  async 'reabrir-caja'(el) {
+    el.disabled = true;
+    try {
+      const r = await api('reabrirCaja', { id: el.dataset.id });
+      guardarDatos(r.datos);
+      if (S.rep.datos) S.rep.datos.fresco = 0;
+      dibujar();
+      aviso('Caja reabierta');
+    } catch (e) { el.disabled = false; aviso(e.red ? 'Reabrir la caja necesita internet.' : e.message); }
+  },
   'form-ciclo'(el) { formCiclo(el.dataset.u, el.dataset.id, !!el.dataset.sig); },
   'form-vac'(el) { formVac(el.dataset.u, el.dataset.id); },
   async 'quitar-vac'(el) {
@@ -1971,6 +2112,10 @@ document.addEventListener('input', (e) => {
   if (e.target.id === 'buscar') { S.busqueda = e.target.value; dibujarProductos(); }
   if (e.target.closest('#f-ticket')) actualizarVistaTicket();
   if (e.target.closest('#f-vac')) actualizarFormVac(e.target.name);
+  if (e.target.closest('#f-cierre') && e.target.name === 'contado' && $('#cierre-dif')) {
+    const c = cajaActual();
+    $('#cierre-dif').innerHTML = e.target.value === '' || !c ? '' : etiquetaDif(Number(e.target.value) - esperadoLocal(c));
+  }
   const f = e.target.closest('#f-prod');
   if (f) {
     if (e.target.name === 'nombre' && f.dataset.colorLibre) {
@@ -2155,6 +2300,50 @@ const F = {
   },
   usuario(f, v) {
     enviarCatalogo('guardarUsuario', { id: f.dataset.id || undefined, nombre: v.nombre, usuario: v.usuario, rol: v.rol, pin: v.pin, turnoId: v.turnoId, asistencia: v.asistencia === 'on', activo: f.dataset.id ? v.activo === 'on' : true }, f, 'Cuenta guardada');
+  },
+  'abrir-caja'(f, v) {
+    if (cajaActual()) return ponerError(f, 'Ya hay una caja abierta.');
+    try { encolar(opCaja({ id: uid('cj_'), accion: 'abrir', fondo: Number(v.fondo) })); } catch (e) { return ponerError(f, e.message); }
+    cerrarDlg();
+    if (S.rep.datos) S.rep.datos.fresco = 0;
+    dibujar();
+    aviso('Caja abierta');
+  },
+  'mov-caja'(f, v) {
+    const c = cajaActual();
+    if (!c) return ponerError(f, 'No hay una caja abierta.');
+    try { encolar(opCaja({ id: uid('mc_'), accion: 'mov', cajaId: c.id, tipoMov: v.tipo, monto: Number(v.monto), motivo: v.motivo })); } catch (e) { return ponerError(f, e.message); }
+    cerrarDlg();
+    if (S.rep.datos) S.rep.datos.fresco = 0;
+    dibujar();
+    aviso('Movimiento guardado');
+  },
+  async 'cerrar-caja'(f, v) {
+    const c = cajaActual();
+    if (!c) return ponerError(f, 'No hay una caja abierta.');
+    const id = c.id;
+    const contado = Number(v.contado);
+    try { encolar(opCaja({ id: uid('cc_'), accion: 'cerrar', cajaId: id, contado, nota: v.nota || '' })); } catch (e) { return ponerError(f, e.message); }
+    cerrarDlg();
+    if (S.rep.datos) S.rep.datos.fresco = 0;
+    dibujar();
+    aviso('Caja cerrada');
+    await sincronizar();
+    if (!$('#dlg').open) resultadoCierre(id, contado);
+    refrescarEstado();
+    if (S.vista === 'vender') { const cb = $('#caja-slot'); if (cb) cb.innerHTML = htmlCajaBar(); dibujarProductos(); }
+    else if (S.vista === 'reportes') dibujar();
+  },
+  async corte(f, v) {
+    const b = $('button:not([type=button])', f); b.disabled = true;
+    try {
+      const r = await api('corregirCaja', { datos: { id: f.dataset.id, fondo: Number(v.fondo), contado: Number(v.contado || 0), nota: v.nota } });
+      guardarDatos(r.datos);
+      cerrarDlg();
+      if (S.rep.datos) S.rep.datos.fresco = 0;
+      dibujar();
+      aviso('Corte corregido');
+    } catch (e) { b.disabled = false; ponerError(f, e.red ? 'Esto necesita internet.' : e.message); }
   },
   ciclo(f, v) {
     enviarCatalogo('guardarCicloVacaciones', { id: f.dataset.id || undefined, empleadoId: f.dataset.u, inicio: v.inicio, dias: Number(v.dias || 0), previos: Number(v.previos || 0), sumarSobrantes: f.elements.sumar ? v.sumar === 'on' : true }, f, 'Periodo guardado');
