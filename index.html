@@ -64,8 +64,8 @@ input.ent,select.ent,textarea.ent{display:block;width:100%;margin-top:5px;paddin
 .nav button{background:none;border:0;padding:8px 2px 7px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12.5px;font-weight:600;color:var(--tinta2)}
 .nav button[aria-current=page]{color:var(--rosa)}
 .nav svg{width:24px;height:24px}
-.barra{display:flex;align-items:center;gap:10px;padding:12px 16px 8px}
-.barra h1{font-size:23px;flex:1;min-width:0;overflow-wrap:anywhere}
+.barra{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:12px 16px 8px}
+.barra h1{font-size:23px;flex:1 1 150px;min-width:0;overflow-wrap:break-word}
 .estado{border:0;background:#D8EFEB;color:#085F56;border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600;white-space:nowrap}
 .estado.pend{background:#FFEFC7;color:#6B4A00}
 .estado.mal{background:var(--alerta-claro);color:var(--alerta)}
@@ -246,6 +246,16 @@ dialog::backdrop{background:rgba(37,22,63,.55)}
 .formato-op input:focus-visible+.caj{outline:3px solid var(--mango);outline-offset:2px}
 .formato-op svg{display:block;width:100%;height:58px;margin-bottom:6px}
 
+/* Saludo de asistencia */
+.persona-op{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;min-height:60px;padding:10px 14px;margin-bottom:8px;border:0;border-radius:12px;background:var(--hielo);text-align:left;font-weight:700;font-size:16px}
+.persona-op span{font-weight:500;font-size:13.5px;color:var(--tinta2);text-align:right}
+.persona-op:active{background:var(--rosa-claro)}
+.saludo{text-align:center;padding:14px 4px 6px}
+.saludo h2{font-size:34px;line-height:1.12;color:var(--rosa);margin-bottom:12px;overflow-wrap:anywhere}
+.saludo p{font-size:16px;color:var(--tinta2);margin-bottom:6px}
+.saludo .deseo{color:var(--tinta);font-weight:600;font-size:17px;margin-bottom:18px}
+.saludo .btn{margin-top:14px;min-width:160px}
+
 /* Caja */
 .caja-bar.alerta{box-shadow:inset 0 0 0 1.5px var(--alerta)}
 .caja-bar .botones{display:flex;gap:6px;flex:none}
@@ -315,7 +325,7 @@ dialog::backdrop{background:rgba(37,22,63,.55)}
 /* Pega aquí la URL del servidor de Apps Script (termina en /exec).
    Si la dejas vacía, la app la pedirá la primera vez en cada dispositivo. */
 const API_URL = '';
-const VERSION_APP = '1.3.0';
+const VERSION_APP = '1.4.0';
 
 /* ========== Utilidades ========== */
 const $ = (s, r = document) => r.querySelector(s);
@@ -457,8 +467,10 @@ function aplicarOp(d, op) {
   }
   if (op.tipo === 'asistencia') {
     const lista = S.asis[op.usuarioId] || (S.asis[op.usuarioId] = []);
+    const persona = d.personal?.find((x) => x.id === op.usuarioId);
+    if (persona) persona.abierto = op.accion === 'entrada' ? { id: op.id, entrada: op.hora, tsEntrada: op.ts } : null;
     if (op.accion === 'entrada') {
-      if (!lista.some((r) => r.id === op.id)) lista.push({ id: op.id, dia: op.dia, empleadoId: op.usuarioId, empleadoNombre: op.usuarioNombre, entrada: op.hora, salida: '', tsEntrada: op.ts, progEntrada: d.miTurno?.entrada || '', progSalida: d.miTurno?.salida || '' });
+      if (!lista.some((r) => r.id === op.id)) lista.push({ id: op.id, dia: op.dia, empleadoId: op.usuarioId, empleadoNombre: op.usuarioNombre, entrada: op.hora, salida: '', tsEntrada: op.ts, progEntrada: '', progSalida: '' });
     } else {
       const r = lista.find((x) => x.id === op.registroId);
       if (r) r.salida = op.hora;
@@ -489,7 +501,7 @@ function aplicarOp(d, op) {
 }
 function aplicarPendientes() {
   if (!S.datos) return;
-  S.cola.forEach((op) => { if (op.tipo !== 'asistencia' || op.usuarioId === S.sesion?.usuario?.id) aplicarOp(S.datos, op); });
+  S.cola.forEach((op) => aplicarOp(S.datos, op));
 }
 
 function encolar(op) {
@@ -1619,28 +1631,82 @@ function registraYo() {
   const propio = (S.datos?.usuarios || []).find((x) => x.id === u.id);
   return propio ? propio.asistencia : (u.asistencia ?? u.rol !== 'socia');
 }
-function registroAbierto() {
-  const lista = S.asis[S.sesion.usuario.id] || [];
-  const limite = Date.now() - 16 * 3600000;
-  return [...lista].reverse().find((r) => !r.salida && r.tsEntrada && new Date(r.tsEntrada).getTime() > limite) || null;
-}
+const personalLista = () => S.datos?.personal || [];
 function htmlTurnoBar() {
-  if (!S.datos || !registraYo()) return '';
-  const a = registroAbierto();
-  const t = S.datos.miTurno;
-  const prog = t ? `Tu turno: ${hora12(t.entrada)} a ${hora12(t.salida)}` : 'Sin turno asignado';
-  return a
-    ? `<div class="turno-bar"><div><b>Entrada a las ${hora12(a.entrada)}</b><span class="chico">${prog}</span></div><button class="btn mini" data-a="asis-salida">Registrar salida</button></div>`
-    : `<div class="turno-bar"><div><b>Sin entrada registrada</b><span class="chico">${prog}</span></div><button class="btn mini pri" data-a="asis-entrada">Registrar entrada</button></div>`;
+  if (!personalLista().length) return '';
+  const adentro = personalLista().filter((x) => x.abierto).map((x) => x.nombre);
+  return `<div class="turno-bar asis"><div><b>Entrada y salida</b><span class="chico">${adentro.length ? `En turno: ${esc(adentro.join(', '))}` : 'Nadie en turno'}</span></div><button class="btn mini pri" data-a="asistencia">Registrar</button></div>`;
 }
-function marcar(accion, registroId) {
+function dialogoAsistencia() {
+  const lista = personalLista();
+  if (lista.length === 1) return dialogoPinAsistencia(lista[0].id);
+  abrirDlg(`${cabDlg('¿Quién registra?')}${lista.map((x) => `<button class="persona-op" data-a="asis-persona" data-id="${esc(x.id)}">${esc(x.nombre)}<span>${x.abierto ? `Entró a las ${hora12(x.abierto.entrada)}` : 'Sin entrada'}</span></button>`).join('')}`);
+}
+function dialogoPinAsistencia(id) {
+  const x = personalLista().find((y) => y.id === id);
+  if (!x) return;
+  abrirDlg(`${cabDlg(x.abierto ? `Salida de ${x.nombre}` : `Entrada de ${x.nombre}`)}<form data-f="pin-asistencia" data-id="${esc(id)}"><div id="f-err"></div>
+    <label class="campo">Tu PIN personal<input class="ent" name="pin" type="password" inputmode="numeric" autocomplete="off" required autofocus></label>
+    <button class="btn pri ancho">${x.abierto ? 'Registrar salida' : 'Registrar entrada'}</button></form>`);
+}
+async function hashServidor(pin, salt) {
+  const enc = new TextEncoder();
+  let v = `${pin}|${salt}`;
+  for (let i = 0; i < 200; i++) {
+    const d = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(v)));
+    v = btoa(String.fromCharCode(...d));
+  }
+  return v;
+}
+const intentosPin = {};
+async function validarPinPersona(x, pin) {
+  const t = intentosPin[x.id];
+  if (t && t.n >= 5 && Date.now() - t.ts < 300000) throw new Error('Demasiados intentos. Espera 5 minutos.');
+  let ok = !!x.hash && (await hashServidor(pin, x.salt)) === x.hash;
+  if (!ok) {
+    const local = Object.values(ls.get('locales', {})).find((l) => l.usuario?.id === x.id);
+    ok = !!local && (await hashLocal(pin, local.salt)) === local.hash;
+  }
+  if (!ok) {
+    try {
+      await api('verificarPin', { usuarioId: x.id, pin });
+      ok = true;
+    } catch (e) {
+      if (e.red && !x.hash) throw new Error('Sin conexión: esta cuenta necesita internet para verificar su PIN.');
+      if (!e.red) throw (intentosPin[x.id] = { n: (t?.n || 0) + 1, ts: Date.now() }, e);
+    }
+  }
+  if (!ok) {
+    intentosPin[x.id] = { n: (t?.n || 0) + 1, ts: Date.now() };
+    throw new Error('PIN incorrecto.');
+  }
+  delete intentosPin[x.id];
+}
+function deseoDelMomento(d = new Date()) {
+  const h = d.getHours();
+  if (h >= 5 && h < 12) return 'Que tengas lindo día.';
+  if (h >= 12 && h < 19) return 'Que tengas linda tarde.';
+  return 'Que tengas linda noche.';
+}
+let saludoT;
+function mostrarSaludo(html) {
+  const marca = uid('s');
+  abrirDlg(`<div class="saludo" data-m="${marca}">${html}<div><button class="btn pri" data-a="cerrar">Listo</button></div></div>`);
+  clearTimeout(saludoT);
+  saludoT = setTimeout(() => {
+    if ($(`.saludo[data-m="${marca}"]`)) cerrarDlg();
+  }, 7000);
+}
+function marcar(x, accion) {
   const ahora = new Date();
-  const u = S.sesion.usuario;
   const hora = `${pad(ahora.getHours())}:${pad(ahora.getMinutes())}`;
-  encolar({ id: uid(accion === 'entrada' ? 'a_' : 'as_'), tipo: 'asistencia', accion, registroId, dia: diaStr(ahora), hora, ts: ahora.toISOString(), usuarioId: u.id, usuarioNombre: u.nombre });
-  cerrarDlg();
-  dibujar();
-  aviso(accion === 'entrada' ? `Entrada registrada: ${hora12(hora)}` : `Salida registrada: ${hora12(hora)}`);
+  encolar({ id: uid(accion === 'entrada' ? 'a_' : 'as_'), tipo: 'asistencia', accion, registroId: x.abierto?.id, dia: diaStr(ahora), hora, ts: ahora.toISOString(), usuarioId: x.id, usuarioNombre: x.nombre });
+  if (S.vista === 'vender') { const b = $('#turno-slot'); if (b) b.innerHTML = htmlTurnoBar(); } else dibujar();
+  if (accion === 'entrada') {
+    mostrarSaludo(`<h2 id="dlg-titulo">Hola ${esc(x.nombre)}, ${esc(x.saludo || 'bienvenido')}</h2><p>Se registra entrada a las ${hora12(hora)}</p>`);
+  } else {
+    mostrarSaludo(`<h2 id="dlg-titulo">Gracias por tu esfuerzo hoy, ${esc(x.nombre)}</h2><p>Se registra salida a las ${hora12(hora)}</p><p class="deseo">${deseoDelMomento(ahora)}</p>`);
+  }
 }
 
 /* ========== Cuenta y ajustes ========== */
@@ -1667,7 +1733,7 @@ function htmlMiCuenta() {
   const mios = (S.asis[u.id] || []).slice(-7).reverse();
   return `<div class="tit-sec"><h2>${esc(u.nombre)}</h2><span class="chico">${socia ? 'Socia' : 'Empleada'}</span></div>
     <div class="acciones" style="margin-bottom:22px"><button class="btn" data-a="form-pin">Cambiar mi PIN</button><button class="btn" data-a="salir">Cerrar sesión</button>${S.instalar ? '<button class="btn pri" data-a="instalar-app">Instalar la app</button>' : ''}</div>
-    ${registraYo() ? `<div class="tit-sec"><h2>Mis registros</h2></div>${htmlTurnoBar().replace('class="turno-bar"', 'class="turno-bar" style="margin:6px 0 8px"')}
+    ${registraYo() ? `<div class="tit-sec"><h2>Mis registros</h2></div>${htmlTurnoBar().replace('class="turno-bar asis"', 'class="turno-bar asis" style="margin:6px 0 8px"')}
       ${mios.map((r) => `<div class="dia-fila" style="grid-template-columns:minmax(92px,1fr) 1fr"><span>${esc(r.dia)}</span><span>${hora12(r.entrada)} a ${r.salida ? hora12(r.salida) : '—'}</span></div>`).join('') || '<p class="chico">Aún no hay registros.</p>'}` : ''}
     ${htmlMisVacaciones()}
     ${socia ? '' : htmlImpresora()}
@@ -1764,6 +1830,7 @@ function formUsuario(id) {
     <label class="campo">${id ? 'PIN nuevo <small>Déjalo vacío para no cambiarlo</small>' : 'PIN <small>De 4 a 8 números</small>'}<input class="ent" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" ${id ? '' : 'required'} autocomplete="new-password"></label>
     <label class="campo">Turno<select class="ent" name="turnoId"><option value="">Sin turno</option>${(S.datos.turnos || []).filter((t) => t.activo || t.id === x.turnoId).map((t) => `<option value="${esc(t.id)}" ${t.id === x.turnoId ? 'selected' : ''}>${esc(t.nombre)}: ${hora12(t.entrada)} a ${hora12(t.salida)}</option>`).join('')}</select></label>
     <label class="check"><input type="checkbox" name="asistencia" ${(x.asistencia ?? x.rol !== 'socia') ? 'checked' : ''}>Registra entrada y salida</label>
+    <label class="campo" style="margin-top:6px">Saludo al registrar entrada<select class="ent" name="saludo"><option value="bienvenido" ${x.saludo !== 'bienvenida' ? 'selected' : ''}>Bienvenido</option><option value="bienvenida" ${x.saludo === 'bienvenida' ? 'selected' : ''}>Bienvenida</option></select></label>
     ${id ? `<label class="check"><input type="checkbox" name="activo" ${x.activo ? 'checked' : ''}>Tiene acceso</label>` : ''}
     <button class="btn pri ancho" style="margin-top:8px">Guardar cuenta</button></form>`);
 }
@@ -2034,13 +2101,8 @@ const A = {
       aviso('Quitado');
     } catch (e) { el.disabled = false; ponerError(f, e.red ? 'Esto necesita internet.' : e.message); }
   },
-  'asis-entrada'() { marcar('entrada'); },
-  'asis-salida'() {
-    const a = registroAbierto();
-    if (!a) return;
-    abrirDlg(`${cabDlg('Registrar salida')}<div class="pista">Entraste a las ${hora12(a.entrada)}. Tu salida queda con la hora actual.</div><div class="acciones"><button class="btn" data-a="cerrar">Volver</button><button class="btn pri" data-a="asis-salida-ok">Registrar salida</button></div>`);
-  },
-  'asis-salida-ok'() { const a = registroAbierto(); if (a) marcar('salida', a.id); },
+  asistencia: dialogoAsistencia,
+  'asis-persona'(el) { dialogoPinAsistencia(el.dataset.id); },
   cfg(el) { S.cfgTab = el.dataset.k; dibujar(); $('#principal').scrollTop = 0; },
   'form-turno'(el) { formTurno(el.dataset.id); },
   'quitar-foto'() { S.fotoNueva = ''; const m = $('#muestra-foto'); m.style.backgroundImage = ''; $('#btn-quitar-foto').hidden = true; },
@@ -2299,7 +2361,22 @@ const F = {
     enviarCatalogo('guardarSabor', { id: f.dataset.id || undefined, nombre: v.nombre, color: v.color, costoLitro: Number(v.costoLitro || 0), minimo: Number(v.minimo || 0), activo: f.dataset.id ? v.activo === 'on' : true }, f, 'Sabor guardado');
   },
   usuario(f, v) {
-    enviarCatalogo('guardarUsuario', { id: f.dataset.id || undefined, nombre: v.nombre, usuario: v.usuario, rol: v.rol, pin: v.pin, turnoId: v.turnoId, asistencia: v.asistencia === 'on', activo: f.dataset.id ? v.activo === 'on' : true }, f, 'Cuenta guardada');
+    enviarCatalogo('guardarUsuario', { id: f.dataset.id || undefined, nombre: v.nombre, usuario: v.usuario, rol: v.rol, pin: v.pin, turnoId: v.turnoId, saludo: v.saludo, asistencia: v.asistencia === 'on', activo: f.dataset.id ? v.activo === 'on' : true }, f, 'Cuenta guardada');
+  },
+  async 'pin-asistencia'(f, v) {
+    const x = personalLista().find((y) => y.id === f.dataset.id);
+    if (!x) return ponerError(f, 'Esa persona ya no está en la lista.');
+    const b = $('button:not([type=button])', f);
+    b.disabled = true;
+    try {
+      await validarPinPersona(x, v.pin);
+      marcar(x, x.abierto ? 'salida' : 'entrada');
+    } catch (e) {
+      b.disabled = false;
+      ponerError(f, e.message);
+      const i = f.elements.pin;
+      if (i) { i.value = ''; i.focus(); }
+    }
   },
   'abrir-caja'(f, v) {
     if (cajaActual()) return ponerError(f, 'Ya hay una caja abierta.');
