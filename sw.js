@@ -1,5 +1,5 @@
 /* Sube este número cada vez que publiques cambios */
-const VERSION = 'paleteria-1.6.0';
+const VERSION = 'paleteria-1.6.1';
 const ARCHIVOS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', (e) => {
